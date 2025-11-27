@@ -1,0 +1,92 @@
+/* gestures.js */
+AFRAME.registerComponent("gesture-detector", {
+  schema: { element: { default: "" } },
+  init: function() {
+    this.targetElement = this.data.element && document.querySelector(this.data.element);
+    if (!this.targetElement) { this.targetElement = this.el; }
+    this.internalState = { previousState: null };
+    this.emitGestureEvent = this.emitGestureEvent.bind(this);
+    this.targetElement.addEventListener("touchstart", this.emitGestureEvent);
+    this.targetElement.addEventListener("touchend", this.emitGestureEvent);
+    this.targetElement.addEventListener("touchmove", this.emitGestureEvent);
+  },
+  remove: function() {
+    this.targetElement.removeEventListener("touchstart", this.emitGestureEvent);
+    this.targetElement.removeEventListener("touchend", this.emitGestureEvent);
+    this.targetElement.removeEventListener("touchmove", this.emitGestureEvent);
+  },
+  emitGestureEvent: function(event) {
+    const currentState = this.getTouchState(event);
+    const previousState = this.internalState.previousState;
+    const gestureContinues = previousState && currentState && currentState.touchCount == previousState.touchCount;
+    const gestureEnded = previousState && !gestureContinues;
+    const gestureStarted = currentState && !gestureContinues;
+
+    if (gestureEnded) { this.el.emit("gesture-end"); }
+    if (gestureStarted) { this.el.emit("gesture-start"); }
+    if (gestureContinues) {
+      const eventDetail = {
+        positionChange: { x: currentState.position.x - previousState.position.x, y: currentState.position.y - previousState.position.y },
+        spreadChange: currentState.spread - previousState.spread,
+        startPosition: currentState.position,
+        position: currentState.position
+      };
+      this.el.emit("gesture-move", eventDetail);
+    }
+    this.internalState.previousState = currentState;
+  },
+  getTouchState: function(event) {
+    if (event.touches.length === 0) return null;
+    if (event.touches.length === 1) {
+      return { touchCount: 1, position: { x: event.touches[0].pageX, y: event.touches[0].pageY }, spread: 0 };
+    }
+    const p1 = { x: event.touches[0].pageX, y: event.touches[0].pageY };
+    const p2 = { x: event.touches[1].pageX, y: event.touches[1].pageY };
+    const spread = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+    const midPoint = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+    return { touchCount: 2, position: midPoint, spread: spread };
+  }
+});
+
+AFRAME.registerComponent("gesture-handler", {
+  schema: {
+    enabled: { default: true },
+    rotationFactor: { default: 5 },
+    minScale: { default: 0.05 }, // Tamaño mínimo
+    maxScale: { default: 8 }     // Tamaño máximo
+  },
+  init: function() {
+    this.handleScale = this.handleScale.bind(this);
+    this.handleRotation = this.handleRotation.bind(this);
+    this.isVisible = false;
+    this.initialScale = this.el.object3D.scale.clone();
+    this.scaleFactor = 1;
+    this.el.sceneEl.addEventListener("markerFound", (e) => { this.isVisible = true; });
+    this.el.sceneEl.addEventListener("markerLost", (e) => { this.isVisible = false; });
+  },
+  update: function() {
+    if (this.data.enabled) {
+      this.el.sceneEl.addEventListener("gesture-move", this.handleRotation);
+      this.el.sceneEl.addEventListener("gesture-move", this.handleScale);
+    } else {
+      this.el.sceneEl.removeEventListener("gesture-move", this.handleRotation);
+      this.el.sceneEl.removeEventListener("gesture-move", this.handleScale);
+    }
+  },
+  handleRotation: function(event) {
+    if (this.isVisible) {
+      this.el.object3D.rotation.y += event.detail.positionChange.x * this.data.rotationFactor * 2 * Math.PI / 1000;
+      // Descomenta la linea de abajo si quieres moverlo de arriba a abajo también
+      // this.el.object3D.rotation.x += event.detail.positionChange.y * this.data.rotationFactor * 2 * Math.PI / 1000;
+    }
+  },
+  handleScale: function(event) {
+    if (this.isVisible && event.detail.spreadChange) {
+      this.scaleFactor *= 1 + event.detail.spreadChange / 1000;
+      this.scaleFactor = Math.min(Math.max(this.scaleFactor, this.data.minScale), this.data.maxScale);
+      this.el.object3D.scale.x = this.scaleFactor * this.initialScale.x;
+      this.el.object3D.scale.y = this.scaleFactor * this.initialScale.y;
+      this.el.object3D.scale.z = this.scaleFactor * this.initialScale.z;
+    }
+  }
+});
