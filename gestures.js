@@ -1,4 +1,6 @@
-/* gestures.js */
+/* gestures.js - Versión Completa: Rotar, Escalar y Mover */
+
+// Componente 1: Detecta qué están haciendo los dedos
 AFRAME.registerComponent("gesture-detector", {
   schema: { element: { default: "" } },
   init: function() {
@@ -29,7 +31,8 @@ AFRAME.registerComponent("gesture-detector", {
         positionChange: { x: currentState.position.x - previousState.position.x, y: currentState.position.y - previousState.position.y },
         spreadChange: currentState.spread - previousState.spread,
         startPosition: currentState.position,
-        position: currentState.position
+        position: currentState.position,
+        touchCount: currentState.touchCount // Importante: enviamos cuántos dedos hay
       };
       this.el.emit("gesture-move", eventDetail);
     }
@@ -48,19 +51,24 @@ AFRAME.registerComponent("gesture-detector", {
   }
 });
 
+// Componente 2: Reacciona a los gestos moviendo el objeto
 AFRAME.registerComponent("gesture-handler", {
   schema: {
     enabled: { default: true },
-    rotationFactor: { default: 5 },
-    minScale: { default: 0.05 }, // Tamaño mínimo
-    maxScale: { default: 8 }     // Tamaño máximo
+    rotationFactor: { default: 5 }, // Velocidad de rotación
+    minScale: { default: 0.05 },
+    maxScale: { default: 8 },
+    panningFactor: { default: 0.005 } // Velocidad de movimiento
   },
   init: function() {
     this.handleScale = this.handleScale.bind(this);
     this.handleRotation = this.handleRotation.bind(this);
+    this.handlePan = this.handlePan.bind(this);
+    
     this.isVisible = false;
     this.initialScale = this.el.object3D.scale.clone();
     this.scaleFactor = 1;
+
     this.el.sceneEl.addEventListener("markerFound", (e) => { this.isVisible = true; });
     this.el.sceneEl.addEventListener("markerLost", (e) => { this.isVisible = false; });
   },
@@ -68,25 +76,44 @@ AFRAME.registerComponent("gesture-handler", {
     if (this.data.enabled) {
       this.el.sceneEl.addEventListener("gesture-move", this.handleRotation);
       this.el.sceneEl.addEventListener("gesture-move", this.handleScale);
+      this.el.sceneEl.addEventListener("gesture-move", this.handlePan);
     } else {
       this.el.sceneEl.removeEventListener("gesture-move", this.handleRotation);
       this.el.sceneEl.removeEventListener("gesture-move", this.handleScale);
+      this.el.sceneEl.removeEventListener("gesture-move", this.handlePan);
     }
   },
   handleRotation: function(event) {
-    if (this.isVisible) {
+    // Solo rota si hay 1 dedo
+    if (this.isVisible && event.detail.touchCount === 1) {
       this.el.object3D.rotation.y += event.detail.positionChange.x * this.data.rotationFactor * 2 * Math.PI / 1000;
-      // Descomenta la linea de abajo si quieres moverlo de arriba a abajo también
+      // Opcional: Descomenta si quieres rotar arriba/abajo también
       // this.el.object3D.rotation.x += event.detail.positionChange.y * this.data.rotationFactor * 2 * Math.PI / 1000;
     }
   },
   handleScale: function(event) {
-    if (this.isVisible && event.detail.spreadChange) {
+    // Solo escala si hay 2 dedos y cambio de distancia
+    if (this.isVisible && event.detail.touchCount === 2 && event.detail.spreadChange) {
       this.scaleFactor *= 1 + event.detail.spreadChange / 1000;
       this.scaleFactor = Math.min(Math.max(this.scaleFactor, this.data.minScale), this.data.maxScale);
       this.el.object3D.scale.x = this.scaleFactor * this.initialScale.x;
       this.el.object3D.scale.y = this.scaleFactor * this.initialScale.y;
       this.el.object3D.scale.z = this.scaleFactor * this.initialScale.z;
+    }
+  },
+  handlePan: function(event) {
+    // Solo mueve (pan) si hay 2 dedos
+    if (this.isVisible && event.detail.touchCount === 2) {
+      // Movemos en X y en Y (que en el espacio 3D puede ser Z dependiendo de la rotación)
+      // El factor depende de la escala para que no se mueva demasiado rápido si el objeto es pequeño
+      const currentScale = this.el.object3D.scale.x; 
+      const factor = this.data.panningFactor / currentScale; 
+
+      this.el.object3D.position.x += event.detail.positionChange.x * factor;
+      
+      // Nota: Invertimos Y porque arrastrar hacia abajo en pantalla es positivo, pero en 3D suele ser negativo
+      // Si tu modelo está rotado 90 grados, el eje Y de pantalla corresponde al Z del modelo.
+      this.el.object3D.position.y -= event.detail.positionChange.y * factor; 
     }
   }
 });
